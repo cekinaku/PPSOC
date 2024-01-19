@@ -124,6 +124,7 @@ int main()
 			xil_printf("\nProcessing frame 2\n");
 			process_frame(frame_buffer2);
 		}
+
 	}
 
 	/* never reached */

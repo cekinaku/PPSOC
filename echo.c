@@ -254,7 +254,7 @@ void lwip_initialization()
 
 void send_frame(pixel_t* frame_buffer) {
 
-	xil_printf("Entered send frame.\n");
+	//xil_printf("Entered send frame.\n");
 	isFrameSending = 1;
     struct tcp_pcb *pcb = getGlobalPcb();
 
@@ -264,11 +264,11 @@ void send_frame(pixel_t* frame_buffer) {
         return;
     }
 
-    frame_size = FRAME_WIDTH * FRAME_HEIGHT * sizeof(pixel_t);
+    frame_size = FRAME_WIDTH * FRAME_HEIGHT;
     bytes_sent = 0;
 
     uint16_t tcp_sndf = tcp_sndbuf(pcb);
-    xil_printf("tcp_sndbuf initial %d\n", tcp_sndf);
+    //xil_printf("tcp_sndbuf initial %d\n", tcp_sndf);
 
     // Send the frame data over TCP
     err_t err = tcp_write(pcb, frame_buffer, MAX_PBUF_SIZE, 0);  // Set the 'apiflags' parameter to 1 for TCP_WRITE_FLAG_COPY
@@ -281,11 +281,13 @@ void send_frame(pixel_t* frame_buffer) {
     // Signal lwIP to send the data
     tcp_output(pcb);
 
-    xil_printf("Packet sent successfully.\n");
+    //xil_printf("Packet sent successfully.\n");
 }
 
 void process_frame(pixel_t* input_buffer) {
-	int numOfPixels = 0;
+
+
+    int numOfPixels = 0;
     for (int y = 0; y < FRAME_HEIGHT; y++) {
         for (int x = 0; x < FRAME_WIDTH; x++) {
             // Calculate index for the current pixel
@@ -314,6 +316,6 @@ void process_frame(pixel_t* input_buffer) {
     		break;
     	}
     }
-    memcpy(send_frame_buffer, processed_frame_buffer, numOfPixels * 2);
+    memcpy(send_frame_buffer, input_buffer, numOfPixels * 2);
     send_frame(send_frame_buffer);
 }
