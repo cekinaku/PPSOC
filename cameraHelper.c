@@ -136,16 +136,12 @@ int init_ov7670()
 	xil_printf("Set ov7670 default regs\n");
 	wrSensorRegs8_8(ov7670_default_regs);
 
-	xil_printf("Set resolution\n");
-	int reg_com7 = iic_read_reg(REG_COM7);
-	//iic_write_reg(REG_COM7,reg_com7|COM7_VGA);
-	//wrSensorRegs8_8(ov7670_VGA);
 
 	xil_printf("Set colour\n");
 	wrSensorRegs8_8(ov7670_fmt_rgb565);
 
 	xil_printf("Set test\n");
-	wrSensorRegs8_8(ov7670_test_bar);
+	wrSensorRegs8_8(ov7670_test_FadeToGray);
 
 	Status = isCameraConfiguredCorrectly();
 	if(Status != XST_SUCCESS){

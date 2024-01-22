@@ -1,110 +1,115 @@
-#include "axiVdmaHelper.h"
+#include "axiVdmaRegisters.h"
 
-XAxiVdma vdma;
 
-int check_vdma_status() {
-    u32 status = XAxiVdma_ReadReg(vdma.BaseAddr, XAXIVDMA_SR_OFFSET + XAXIVDMA_RX_OFFSET);
+int vdma_setup(vdma_handle *handle,
+			   unsigned int baseAddr,
+			   int width,
+			   int height,
+			   int pixelLength,
+			   unsigned int fb1Addr,
+			   unsigned int fb2Addr,
+			   unsigned int fb3Addr) {
+    handle->width=width;
+    handle->height=height;
+    handle->pixelLength=pixelLength;
+    handle->fbLength=pixelLength*width*height;
 
-    // Extract the frame count using the mask
-    u32 frame_count = (status & XAXIVDMA_FRMCNT_MASK) >> XAXIVDMA_FRMCNT_SHIFT;
-
-    return frame_count;
+    handle->vdmaVirtualAddress = (unsigned int *)baseAddr;
+    handle->fb1PhysicalAddress = (uint16_t *)fb1Addr;
+    handle->fb2PhysicalAddress = (uint16_t *)fb2Addr;
+    handle->fb3PhysicalAddress = (uint16_t *)fb3Addr;
+    return 0;
 }
 
-int check_axi_vdma_configuration(XAxiVdma *vdma) {
-    u32 status = XAxiVdma_ReadReg(vdma->BaseAddr, XAXIVDMA_SR_OFFSET + XAXIVDMA_RX_OFFSET);
 
-    // Check if VDMA is halted
-    if (status & XAXIVDMA_SR_HALTED_MASK) {
-        xil_printf("Error: VDMA is halted.\n");
-        return XST_FAILURE;
-    }
-
-    // Check if VDMA is idle
-    if ((status & XAXIVDMA_SR_IDLE_MASK)) {
-        xil_printf("Error: VDMA is idle, not running.\n");
-        return XST_FAILURE;
-    }
-
-    // Check for errors in the VDMA
-     if (status & XAXIVDMA_SR_ERR_ALL_MASK) {
-         xil_printf("Error: VDMA has errors (SR = 0x%x).\n", status);
-         // will print EOL error and interrupt error probbably due to mismatch in timing(clock missmatch)
-     }
-
-    xil_printf("AXI VDMA configuration is correct.\n");
-    return XST_SUCCESS;
+unsigned int vdma_get(vdma_handle *handle, int num) {
+    return handle->vdmaVirtualAddress[num>>2];
 }
 
-void init_axi_vdma() {
-    XAxiVdma_Config *vdma_config;
-    int status;
+void vdma_set(vdma_handle *handle, int num, unsigned int val) {
+    handle->vdmaVirtualAddress[num>>2]=val;
+}
 
-    // Initialize AXI VDMA
-    vdma_config = XAxiVdma_LookupConfig(VDMA_DEVICE_ID);
-    if (!vdma_config) {
-        // Handle configuration error
-        xil_printf("Error: Could not find VDMA configuration.\n");
-        return;
-    }
+void vdma_start_s2mm(vdma_handle *handle) {
+    // Reset VDMA
+    vdma_set(handle, OFFSET_VDMA_S2MM_CONTROL_REGISTER, VDMA_CONTROL_REGISTER_RESET);
 
-    status = XAxiVdma_CfgInitialize(&vdma, vdma_config, vdma_config->BaseAddress);
-    if (status != XST_SUCCESS) {
-        // Handle initialization errSor
-        xil_printf("Error: VDMA initialization failed with status %d.\n", status);
-        return;
-    }
+    // Wait for reset to finish
+    while((vdma_get(handle, OFFSET_VDMA_S2MM_CONTROL_REGISTER) & VDMA_CONTROL_REGISTER_RESET)==4);
 
-    // reset AXI_VDMA
-    XAxiVdma_WriteReg(vdma.BaseAddr, XAXIVDMA_RX_OFFSET, XAXIVDMA_CR_RESET_MASK);
-
-    // wait for reset to finish
-    while((XAxiVdma_ReadReg(vdma.BaseAddr, XAXIVDMA_RX_OFFSET) & XAXIVDMA_CR_RESET_MASK)==4);
+    // Clear all error bits in status register
+    vdma_set(handle, OFFSET_VDMA_S2MM_STATUS_REGISTER, 0);
 
     // Do not mask interrupts
-    XAxiVdma_WriteReg(vdma.BaseAddr, XAXIVDMA_S2MM_DMA_IRQ_MASK_OFFSET, 0xf);
+    vdma_set(handle, OFFSET_VDMA_S2MM_IRQ_MASK, 0xf);
 
-    XAxiVdma_WriteReg(vdma.BaseAddr, XAXIVDMA_RX_OFFSET,
-    	(NUM_FRAMES << 16) |
-		XAXIVDMA_CR_RUNSTOP_MASK |
-		XAXIVDMA_CR_SYNC_EN_MASK |
-		XAXIVDMA_CR_GENLCK_SRC_MASK |
-		XAXIVDMA_CR_TAIL_EN_MASK);
+    int interrupt_frame_count = 3;
 
-    // wait for start
-    while((XAxiVdma_ReadReg(vdma.BaseAddr, XAXIVDMA_RX_OFFSET) & XAXIVDMA_CR_RUNSTOP_MASK)==0 || (XAxiVdma_ReadReg(vdma.BaseAddr, XAXIVDMA_RX_OFFSET + XAXIVDMA_SR_OFFSET) & XAXIVDMA_SR_HALTED_MASK)==1);
-
-    // Configure frame buffer addresses
-    XAxiVdma_SetFrmStore(&vdma, NUM_FRAMES, XAXIVDMA_WRITE);
-    XAxiVdma_WriteReg(vdma.BaseAddr, S2MM_REG_INDEX, 0);
+    // Start up buffer number
+    vdma_set(handle, OFFSET_VDMA_S2MM_CONTROL_REGISTER,
+        (interrupt_frame_count << 16) |
+        VDMA_CONTROL_REGISTER_START |
+        VDMA_CONTROL_REGISTER_GENLOCK_ENABLE |
+        VDMA_CONTROL_REGISTER_INTERNAL_GENLOCK |
+        VDMA_CONTROL_REGISTER_CIRCULAR_PARK);
 
 
-    // Set the buffer addresses, assuming contiguous physical memory
-    XAxiVdma_WriteReg(vdma.BaseAddr, S2MM_START_ADDRESS, FRAME_BUFFER1_ADDR);
-    XAxiVdma_WriteReg(vdma.BaseAddr, S2MM_START_ADDRESS + 4, FRAME_BUFFER2_ADDR);
-    XAxiVdma_WriteReg(vdma.BaseAddr, S2MM_START_ADDRESS + 8, FRAME_BUFFER3_ADDR);
 
-    // Configure AXI VDMA for triple buffering
-    XAxiVdma_WriteReg(vdma.BaseAddr, XAXIVDMA_FRMSTORE_OFFSET, NUM_FRAMES - 1);
+    while((vdma_get(handle, 0x30)&1)==0 || (vdma_get(handle, 0x34)&1)==1);
+
+    // Extra register index, use first 16 frame pointer registers
+    vdma_set(handle, OFFSET_VDMA_S2MM_REG_INDEX, 0);
+
+    // Write physical addresses to control register
+    vdma_set(handle, OFFSET_VDMA_S2MM_FRAMEBUFFER1, (unsigned int)handle->fb1PhysicalAddress);
+    vdma_set(handle, OFFSET_VDMA_S2MM_FRAMEBUFFER2, (unsigned int)handle->fb2PhysicalAddress);
+    vdma_set(handle, OFFSET_VDMA_S2MM_FRAMEBUFFER3, (unsigned int)handle->fb3PhysicalAddress);
 
     // Write Park pointer register
-    XAxiVdma_WriteReg(vdma.BaseAddr, XAXIVDMA_PARKPTR_OFFSET, 0);
+    vdma_set(handle, OFFSET_PARK_PTR_REG, 0);
 
     // Frame delay and stride (bytes)
-    XAxiVdma_WriteReg(vdma.BaseAddr, OFFSET_VDMA_S2MM_FRMDLY_STRIDE, FRAME_WIDTH * 2);
+    vdma_set(handle, OFFSET_VDMA_S2MM_FRMDLY_STRIDE, handle->width*handle->pixelLength);
+
+    // Write horizontal size (bytes)
+    vdma_set(handle, OFFSET_VDMA_S2MM_HSIZE, handle->width*handle->pixelLength);
+
+    // Write vertical size (lines), this actually starts the transfer
+    vdma_set(handle, OFFSET_VDMA_S2MM_VSIZE, handle->height);
+    vdma_set(handle, OFFSET_VDMA_S2MM_STATUS_REGISTER, 0);
+    sleep(5);
+}
+
+int vdma_running(vdma_handle *handle) {
+    // Check whether VDMA is running, that is ready to start transfers
+    return (vdma_get(handle, 0x34)&1)==1;
+}
 
 
-    // Set frame dimensions
-    XAxiVdma_WriteReg(vdma.BaseAddr, XAXIVDMA_S2MM_ADDR_OFFSET + XAXIVDMA_HSIZE_OFFSET, FRAME_WIDTH * 2);
-    XAxiVdma_WriteReg(vdma.BaseAddr, XAXIVDMA_S2MM_ADDR_OFFSET + XAXIVDMA_VSIZE_OFFSET, FRAME_HEIGHT);
+int vdma_idle(vdma_handle *handle) {
+    // Check whtether VDMA is transferring
+    return (vdma_get(handle, OFFSET_VDMA_S2MM_STATUS_REGISTER) & VDMA_STATUS_REGISTER_FrameCountInterrupt)!=0;
+}
 
+void vdma_status_dump(int status) {
+    if (status & VDMA_STATUS_REGISTER_HALTED) xil_printf(" halted"); else xil_printf("running");
+    //if (status & VDMA_STATUS_REGISTER_VDMAInternalError) xil_printf(" vdma-internal-error");
+    //if (status & VDMA_STATUS_REGISTER_VDMASlaveError) xil_printf(" vdma-slave-error");
+    //if (status & VDMA_STATUS_REGISTER_VDMADecodeError) xil_printf(" vdma-decode-error");
+    //if (status & VDMA_STATUS_REGISTER_StartOfFrameEarlyError) xil_printf(" start-of-frame-early-error");
+    //if (status & VDMA_STATUS_REGISTER_EndOfLineEarlyError) xil_printf(" end-of-line-early-error");
+    //if (status & VDMA_STATUS_REGISTER_StartOfFrameLateError) xil_printf(" start-of-frame-late-error");
+    if (status & VDMA_STATUS_REGISTER_FrameCountInterrupt) xil_printf(" frame-count-interrupt");
+    //if (status & VDMA_STATUS_REGISTER_DelayCountInterrupt) xil_printf(" delay-count-interrupt");
+    //if (status & VDMA_STATUS_REGISTER_ErrorInterrupt) xil_printf(" error-interrupt");
+    //if (status & VDMA_STATUS_REGISTER_EndOfLineLateError) xil_printf(" end-of-line-late-error");
+    xil_printf(" frame-count:%d", (status & VDMA_STATUS_REGISTER_FrameCount) >> 16);
+    xil_printf(" delay-count:%d", (status & VDMA_STATUS_REGISTER_DelayCount) >> 24);
+    xil_printf("\n");
+}
 
-    // Print success message
-    xil_printf("VDMA initialized successfully.\n");
-    // Check AXI VDMA configuration
-    status = check_axi_vdma_configuration(&vdma);
-    if (status != XST_SUCCESS) {
-        // Handle configuration error
-        return;
-    }
+void vdma_s2mm_status_dump(vdma_handle *handle) {
+    int status = vdma_get(handle, OFFSET_VDMA_S2MM_STATUS_REGISTER);
+    xil_printf("S2MM status register (%08x):", status);
+    vdma_status_dump(status);
 }

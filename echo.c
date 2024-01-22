@@ -34,70 +34,33 @@
 #if defined (__arm__) || defined (__aarch64__)
 #include "xil_printf.h"
 #endif
-
-#include "xparameters.h"
 #include "netif/xadapter.h"
-#include "platform.h"
-#include "xil_cache.h"
-#include "platform_config.h"
-#include "axiVdmaHelper.h"
 
-
-typedef uint16_t pixel_t;
-
-void lwip_init();
-
-// global variables
-static struct netif server_netif;
-struct netif *echo_netif;
-struct tcp_pcb *globalPcb;
-int isFrameSending = 0;
-size_t frame_size = 0;
-size_t bytes_sent = 0;
-size_t MAX_PBUF_SIZE = 10024;
-
-// Define the buffer at a specific address
-pixel_t* processed_frame_buffer = (pixel_t*)0x13000000;
-pixel_t* send_frame_buffer = (pixel_t*)0x14000000;
-
-void
-print_ip(char *msg, ip_addr_t *ip)
-{
-	print(msg);
-	xil_printf("%d.%d.%d.%d\n\r", ip4_addr1(ip), ip4_addr2(ip),
-			ip4_addr3(ip), ip4_addr4(ip));
-}
-
-void
-print_ip_settings(ip_addr_t *ip, ip_addr_t *mask, ip_addr_t *gw)
-{
-
-	print_ip("Board IP: ", ip);
-	print_ip("Netmask : ", mask);
-	print_ip("Gateway : ", gw);
-}
+struct tcp_pcb * pcbGlobal;
+u32_t bytes_to_send;
+int last_packet_sent;
+void *send_head;
+struct netif *globalNetif;
+int packets_sent = 0;
 
 int transfer_data() {
 	return 0;
 }
 
-struct tcp_pcb* getGlobalPcb() {
-    return globalPcb;
-}
-
-struct netif* getGlobalEchoNetif() {
-    return echo_netif;
-}
-
 void print_app_header()
 {
+#if (LWIP_IPV6==0)
+	xil_printf("\n\r\n\r-----lwIP TCP echo server ------\n\r");
+#else
 	xil_printf("\n\r\n\r-----lwIPv6 TCP echo server ------\n\r");
+#endif
 	xil_printf("TCP packets sent to port 6001 will be echoed back\n\r");
 }
 
 err_t recv_callback(void *arg, struct tcp_pcb *tpcb,
                                struct pbuf *p, err_t err)
 {
+
 	/* do not read the packet if we are not in ESTABLISHED state */
 	if (!p) {
 		tcp_close(tpcb);
@@ -108,8 +71,11 @@ err_t recv_callback(void *arg, struct tcp_pcb *tpcb,
 	/* indicate that the packet has been received */
 	tcp_recved(tpcb, p->len);
 
+	/* echo back the payload */
+	/* in this case, we assume that the payload is < TCP_SND_BUF */
 	if (tcp_sndbuf(tpcb) > p->len) {
 		err = tcp_write(tpcb, p->payload, p->len, 1);
+		xil_printf("txperf: status on tcp_write: %d\r\n", err);
 	} else
 		xil_printf("no space in tcp_sndbuf\n\r");
 
@@ -121,33 +87,56 @@ err_t recv_callback(void *arg, struct tcp_pcb *tpcb,
 
 err_t sent_callback(void *arg, struct tcp_pcb *tpcb, u16_t len) {
 
-	xil_printf("bytes sent:%d.\n", bytes_sent);
-	if (bytes_sent >= frame_size) {
-		xil_printf("Frame sent succesfully.\n");
-		isFrameSending = 0;
+	xil_printf("Entered Sent callback\n");
+	//uint16_t tcp_sndf = tcp_sndbuf(tpcb);
+	//xil_printf("tcp_sndbuf cb %d\n", tcp_sndf);
+
+	uint32_t max_bytes = 10024;
+	uint32_t packet_size = bytes_to_send;
+	err_t status;
+	//xil_printf("bytes to send start %d\n", bytes_to_send);
+	//xil_printf("initial packer size %d\n", packet_size);
+
+	packets_sent++;
+	if (bytes_to_send == 0) {
+		//xil_printf("bytes to send is 0");
+		//xil_printf("Packets per frame: %d", packets_sent);
+		last_packet_sent = 1;
 		return ERR_OK;
 	}
 
-	size_t send_size = frame_size - bytes_sent;
-
-	if (send_size > MAX_PBUF_SIZE) {
-		send_size = MAX_PBUF_SIZE;
+	if (packet_size > max_bytes) {
+		//xil_printf("packet size is larger than max bytes limit \n");
+		packet_size = max_bytes;
+		//xil_printf("packet_size %d\n", packet_size);
 	}
 
-    err_t err = tcp_write(tpcb, processed_frame_buffer + bytes_sent, send_size, 0);
-    if (err != ERR_OK) {
-        xil_printf("Error: Failed to write packet data to TCP connection (err = %d).\n", err);
-        return err;
-    }
+	status = tcp_write(tpcb, send_head, packet_size, 0);
+	if (status != ERR_OK) {
+		xil_printf("txperf: Error on tcp_write: %d\r\n", status);
+		return status;
+	}
 
-    // Signal lwIP to send the data
-    tcp_output(tpcb);
+	//xil_printf("compariosn packetSize %d\n", packet_size);
 
-    // Update the number of bytes sent
-    bytes_sent += send_size;
+	if (packet_size == bytes_to_send) {
+		bytes_to_send = 0;
+	} else {
+		bytes_to_send -= packet_size;
+	}
 
-    //xil_printf("Packet sent.\n");
-    return ERR_OK;
+	//xil_printf("bytes to send reduced %d\n", bytes_to_send);
+
+	send_head += packet_size;
+
+	status = tcp_output(tpcb);
+	if (status != ERR_OK) {
+		xil_printf("txperf: Error on tcp_output: %d\r\n", status);
+		return status;
+	}
+
+
+    return status;
 }
 
 err_t accept_callback(void *arg, struct tcp_pcb *newpcb, err_t err)
@@ -157,15 +146,18 @@ err_t accept_callback(void *arg, struct tcp_pcb *newpcb, err_t err)
 	/* set the receive callback for this connection */
 	tcp_recv(newpcb, recv_callback);
 
-	/* Set the sent callback for this connection */
-	tcp_sent(newpcb, sent_callback);
-
 	/* just use an integer number indicating the connection id as the
 	   callback argument */
 	tcp_arg(newpcb, (void*)(UINTPTR)connection);
 
-	// Set globalPcb to the newly initialized PCB
-	globalPcb = newpcb;
+	tcp_sent(newpcb, sent_callback);
+
+	// set global pcb
+	pcbGlobal = newpcb;
+	if (newpcb->state == ESTABLISHED) {
+		xil_printf("Conn established\n");
+	}
+
 
 	/* increment for subsequent accepted connections */
 	connection++;
@@ -174,8 +166,9 @@ err_t accept_callback(void *arg, struct tcp_pcb *newpcb, err_t err)
 }
 
 
-int start_application()
+int start_application(struct netif *netif)
 {
+	globalNetif = netif;
 	struct tcp_pcb *pcb;
 	err_t err;
 	unsigned port = 7;
@@ -212,110 +205,48 @@ int start_application()
 	return 0;
 }
 
-void lwip_initialization()
-{
-		ip_addr_t ipaddr, netmask, gw;
+void send_data(struct tcp_pcb *pcb, uint32_t *dataAddress, u32_t dataSize){
 
-		/* the mac address of the board. this should be unique per board */
-		unsigned char mac_ethernet_address[] =
-		{ 0x00, 0x0a, 0x35, 0x00, 0x01, 0x02 };
+	void *copied_value = (void*)0x13000000;
+	memcpy(copied_value, dataAddress, dataSize);
+	uint32_t packetSize;
+	bytes_to_send = dataSize;
+	err_t status;
+	uint32_t max_bytes = 10024;
+	last_packet_sent = 0;
 
-		echo_netif = &server_netif;
+	send_head = copied_value;
+	if (!pcb){
+		xil_printf("\n pcb not initialized  \n");
+	}
 
-		init_platform();
+	packetSize = max_bytes;
 
-		/* initialize IP addresses to be used */
-		IP4_ADDR(&ipaddr,  192, 168,   1, 10);
-		IP4_ADDR(&netmask, 255, 255, 255,  0);
-		IP4_ADDR(&gw,      192, 168,   1,  1);
-		print_app_header();
+	status = tcp_write(pcb, send_head, packetSize, 0);
+	if (status != ERR_OK) {
+		xil_printf("txperf: Error on tcp_write: %d\r\n", status);
+		return;
+	}
 
-		lwip_init();
+	send_head += packetSize;
+	bytes_to_send -= packetSize;
 
-		/* Add network interface to the netif_list, and set it as default */
-		if (!xemac_add(echo_netif, &ipaddr, &netmask,
-							&gw, mac_ethernet_address,
-							PLATFORM_EMAC_BASEADDR)) {
-			xil_printf("Error adding N/W interface\n\r");
+	status = tcp_output(pcb);
+	if (status != ERR_OK) {
+		xil_printf("txperf: Error on tcp_output: %d\r\n", status);
+		return;
+	}
+	packets_sent++;
+
+	while (1) {
+		xemacif_input(globalNetif);
+		if (last_packet_sent == 1) {
+			xil_printf("\na ACKED\n");
 			return;
 		}
-		netif_set_default(echo_netif);
-
-		/* now enable interrupts */
-		platform_enable_interrupts();
-
-		/* specify that the network if is up */
-		netif_set_up(echo_netif);
-
-
-		print_ip_settings(&ipaddr, &netmask, &gw);
+	}
 }
 
-
-void send_frame(pixel_t* frame_buffer) {
-
-	//xil_printf("Entered send frame.\n");
-	isFrameSending = 1;
-    struct tcp_pcb *pcb = getGlobalPcb();
-
-    // Check if the connection is valid
-    if (pcb == NULL || pcb->state != ESTABLISHED) {
-        xil_printf("Error: Invalid or not established TCP connection.\n");
-        return;
-    }
-
-    frame_size = FRAME_WIDTH * FRAME_HEIGHT;
-    bytes_sent = 0;
-
-    uint16_t tcp_sndf = tcp_sndbuf(pcb);
-    //xil_printf("tcp_sndbuf initial %d\n", tcp_sndf);
-
-    // Send the frame data over TCP
-    err_t err = tcp_write(pcb, frame_buffer, MAX_PBUF_SIZE, 0);  // Set the 'apiflags' parameter to 1 for TCP_WRITE_FLAG_COPY
-    if (err != ERR_OK) {
-        xil_printf("Error: Failed to write packet data to TCP connection (err = %d).\n", err);
-        return;
-    }
-
-    bytes_sent += MAX_PBUF_SIZE;
-    // Signal lwIP to send the data
-    tcp_output(pcb);
-
-    //xil_printf("Packet sent successfully.\n");
-}
-
-void process_frame(pixel_t* input_buffer) {
-
-
-    int numOfPixels = 0;
-    for (int y = 0; y < FRAME_HEIGHT; y++) {
-        for (int x = 0; x < FRAME_WIDTH; x++) {
-            // Calculate index for the current pixel
-            int idx = y * FRAME_WIDTH + x;
-
-            // Extract color components from the input buffer
-            uint8_t red = (input_buffer[idx] >> 11) & 0x1F;
-            uint8_t green = (input_buffer[idx] >> 5) & 0x3F;
-            uint8_t blue = input_buffer[idx] & 0x1F;
-
-            // Create the current pixel with extracted values
-            pixel_t current_pixel = (pixel_t)((red << 11) | (green << 5) | blue);
-
-            // Store the pixel in the specified memory region
-            processed_frame_buffer[idx] = current_pixel;
-            numOfPixels++;
-        }
-    }
-    xil_printf("number of pixels:%d\n", numOfPixels);
-
-
-    while (1) {
-    	xemacif_input(echo_netif);
-    	if (isFrameSending == 0) {
-    		xil_printf("\na cked\n");
-    		break;
-    	}
-    }
-    memcpy(send_frame_buffer, input_buffer, numOfPixels * 2);
-    send_frame(send_frame_buffer);
+struct tcp_pcb * getGlobalPcb() {
+	return pcbGlobal;
 }
