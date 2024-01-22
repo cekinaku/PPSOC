@@ -87,7 +87,7 @@ err_t recv_callback(void *arg, struct tcp_pcb *tpcb,
 
 err_t sent_callback(void *arg, struct tcp_pcb *tpcb, u16_t len) {
 
-	xil_printf("Entered Sent callback\n");
+	//xil_printf("Entered Sent callback\n");
 	//uint16_t tcp_sndf = tcp_sndbuf(tpcb);
 	//xil_printf("tcp_sndbuf cb %d\n", tcp_sndf);
 
@@ -207,15 +207,13 @@ int start_application(struct netif *netif)
 
 void send_data(struct tcp_pcb *pcb, uint32_t *dataAddress, u32_t dataSize){
 
-	void *copied_value = (void*)0x13000000;
-	memcpy(copied_value, dataAddress, dataSize);
 	uint32_t packetSize;
 	bytes_to_send = dataSize;
 	err_t status;
 	uint32_t max_bytes = 10024;
 	last_packet_sent = 0;
 
-	send_head = copied_value;
+	send_head = dataAddress;
 	if (!pcb){
 		xil_printf("\n pcb not initialized  \n");
 	}
