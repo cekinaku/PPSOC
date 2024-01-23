@@ -364,12 +364,18 @@ void echo_application_thread()
 
 	while (1) {
 		int sd;
+
 		if ((sd = lwip_accept(sock, (struct sockaddr *)&remote, (socklen_t *)&size) <= 0)) {
 			continue;
 		}
 		while (1) {
-			char *p;
+			char req, *p;
 			int n, nleft;
+
+			if (read(sd, &req, 1) < 1) {
+				xil_printf("%s: error reading from socket %d, closing socket\r\n", __FUNCTION__, sd);
+				break;
+			}
 			switch (XAxiVdma_ReadReg(Vdma_Config->BaseAddress, IRQFrameCntSts) >> IRQFrameCntSts_SHAMT) {
 				default:
 				case 3: p = (char *)FRAMEBUFFER1; break;
@@ -382,7 +388,8 @@ void echo_application_thread()
 				nleft -= n;
 			}
 			if (nleft > 0) {
-				/* connection closed */
+				xil_printf("%s: ERROR responding to client frame request.\r\n", __FUNCTION__);
+				xil_printf("Closing socket %d\r\n", sd);
 				break;
 			}
 		}
