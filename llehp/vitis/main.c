@@ -365,7 +365,7 @@ void echo_application_thread()
 	while (1) {
 		int sd;
 
-		if ((sd = lwip_accept(sock, (struct sockaddr *)&remote, (socklen_t *)&size) <= 0)) {
+		if ((sd = lwip_accept(sock, (struct sockaddr *)&remote, (socklen_t *)&size) < 0)) {
 			continue;
 		}
 		while (1) {
