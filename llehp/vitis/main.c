@@ -376,7 +376,7 @@ void echo_application_thread()
 				xil_printf("%s: error reading from socket %d, closing socket\r\n", __FUNCTION__, sd);
 				break;
 			}
-			switch (XAxiVdma_ReadReg(Vdma_Config->BaseAddress, IRQFrameCntSts) >> IRQFrameCntSts_SHAMT) {
+			switch ((XAxiVdma_ReadReg(Vdma_Config->BaseAddress, S2MM_VDMASR) & IRQFrameCntSts) >> IRQFrameCntSts_SHAMT) {
 				default:
 				case 3: p = (char *)FRAMEBUFFER1; break;
 				case 2: p = (char *)FRAMEBUFFER3; break;
