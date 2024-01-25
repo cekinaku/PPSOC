@@ -378,7 +378,7 @@ void echo_application_thread()
 				case 3: p = (char *)FRAMEBUFFER3; break;
 			}
 			nleft = FRAME_BYTES;
-			while (nleft > 0 && (n = write(sd, p, nleft)) > 0)) {
+			while (nleft > 0 && (n = write(sd, p, nleft)) > 0) {
 			    p += n;
 			    nleft -= n;
 			}

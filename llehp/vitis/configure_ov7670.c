@@ -14,7 +14,7 @@ int configure_ov7670(void)
 	int Status, i;
 	XIicPs_Config *Config;
 	XIicPs Iic;
-	struct regval_list reset = {REG_COM7, COM7_RESET};
+	u8 reset[2] = {REG_COM7, COM7_RESET};
 
 	Config = XIicPs_LookupConfig(IIC_DEVICE_ID);
 	if (NULL == Config) {
@@ -36,7 +36,7 @@ int configure_ov7670(void)
 
 	XIicPs_SetSClk(&Iic, IIC_SCLK_RATE);
 
-	Status = XIicPs_MasterSendPolled(&Iic, &reset, sizeof(reset), IIC_SLAVE_ADDR);
+	Status = XIicPs_MasterSendPolled(&Iic, reset, 2, IIC_SLAVE_ADDR);
 	while (XIicPs_BusIsBusy(&Iic)) {
 		/* NOP */
 	}
@@ -47,10 +47,8 @@ int configure_ov7670(void)
 	usleep(10000); /* OV7670 datasheet says 1 ms */
 
 	for (i = 0; i < sizeof(ov7670_default_regs) / sizeof(struct regval_list) - 1; i++) {
-		Status = XIicPs_MasterSendPolled(&Iic,
-				&ov7670_default_regs[i],
-				sizeof(struct regval_list),
-				IIC_SLAVE_ADDR);
+		u8 buf[2] = {ov7670_default_regs[i].reg_num, ov7670_default_regs[i].value};
+		Status = XIicPs_MasterSendPolled(&Iic, buf, 2, IIC_SLAVE_ADDR);
 		while (XIicPs_BusIsBusy(&Iic)) {
 			/* NOP */
 		}
@@ -58,6 +56,7 @@ int configure_ov7670(void)
 			xil_printf("IIC Write OV7670 Default Regs failed\r\n");
 			return XST_FAILURE;
 		}
+		usleep(10000); /* unneccessary according to the datasheet */
 	}
 
 	for (i = 0; i < sizeof(ov7670_fmt_rgb565) / sizeof(struct regval_list) - 1; i++) {
