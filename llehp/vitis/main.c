@@ -364,18 +364,25 @@ void echo_application_thread()
 
 	while (1) {
 		int sd;
-		if ((sd = lwip_accept(sock, (struct sockaddr *)&remote, (socklen_t *)&size) < 0)) {
+		if ((sd = lwip_accept(sock, (struct sockaddr *)&remote, (socklen_t *)&size)) < 0) {
 			continue;
 		}
 		while (1) {
 			char *p;
+			int n, nleft;
+			
 			switch ((XAxiVdma_ReadReg(Vdma_Config->BaseAddress, S2MM_VDMASR) & IRQFrameCntSts) >> IRQFrameCntSts_SHAMT) {
 				default:
 				case 1: p = (char *)FRAMEBUFFER2; break;
 				case 2: p = (char *)FRAMEBUFFER1; break;
 				case 3: p = (char *)FRAMEBUFFER3; break;
 			}
-			if (write(sd, p, FRAME_BYTES) < FRAME_BYTES) {
+			nleft = FRAME_BYTES;
+			while (nleft > 0 && (n = write(sd, p, nleft)) > 0)) {
+			    p += n;
+			    nleft -= n;
+			}
+			if (nleft > 0) {
 				xil_printf("%s: ERROR responding to client frame request.\r\n", __FUNCTION__);
 				xil_printf("Closing socket %d\r\n", sd);
 				break;
