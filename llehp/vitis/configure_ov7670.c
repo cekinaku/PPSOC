@@ -14,7 +14,7 @@ int configure_ov7670(void)
 	int Status, i;
 	XIicPs_Config *Config;
 	XIicPs Iic;
-	struct 
+	struct regval_list reset = {REG_COM7, COM7_RESET};
 
 	Config = XIicPs_LookupConfig(IIC_DEVICE_ID);
 	if (NULL == Config) {
