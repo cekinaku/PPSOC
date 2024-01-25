@@ -22,8 +22,6 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
-
-    client_socket.send(b'\xFF')
     
     frame_data = bytearray()
     while len(frame_data) < FRAME_SIZE:
