@@ -44,8 +44,7 @@ int configure_ov7670(void)
 		xil_printf("IIC Reset OV7670 failed\r\n");
 		return XST_FAILURE;
 	}
-	usleep(10); /* OV7670 datasheet says 1 ms */
-
+	usleep(10000); /* OV7670 datasheet says 1 ms */
 
 	for (i = 0; i < sizeof(ov7670_default_regs) / sizeof(struct regval_list) - 1; i++) {
 		Status = XIicPs_MasterSendPolled(&Iic,
