@@ -1,6 +1,7 @@
 #include "xparameters.h"
 #include "xiicps.h"
 #include "xil_printf.h"
+#include "sleep.h"
 
 #include "camera_config.h"
 
@@ -13,6 +14,7 @@ int configure_ov7670(void)
 	int Status, i;
 	XIicPs_Config *Config;
 	XIicPs Iic;
+	struct 
 
 	Config = XIicPs_LookupConfig(IIC_DEVICE_ID);
 	if (NULL == Config) {
@@ -33,6 +35,17 @@ int configure_ov7670(void)
 	}
 
 	XIicPs_SetSClk(&Iic, IIC_SCLK_RATE);
+
+	Status = XIicPs_MasterSendPolled(&Iic, &reset, sizeof(reset), IIC_SLAVE_ADDR);
+	while (XIicPs_BusIsBusy(&Iic)) {
+		/* NOP */
+	}
+	if (Status != XST_SUCCESS) {
+		xil_printf("IIC Reset OV7670 failed\r\n");
+		return XST_FAILURE;
+	}
+	usleep(10); /* OV7670 datasheet says 1 ms */
+
 
 	for (i = 0; i < sizeof(ov7670_default_regs) / sizeof(struct regval_list) - 1; i++) {
 		Status = XIicPs_MasterSendPolled(&Iic,
