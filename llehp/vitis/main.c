@@ -374,8 +374,8 @@ void echo_application_thread()
 
 			switch ((XAxiVdma_ReadReg(Vdma_Config->BaseAddress, S2MM_VDMASR) & IRQFrameCntSts) >> IRQFrameCntSts_SHAMT) {
 				default:
-				case 1: p = (char *)FRAMEBUFFER1; break;
-				case 2: p = (char *)FRAMEBUFFER2; break;
+				case 1: p = (char *)FRAMEBUFFER2; break;
+				case 2: p = (char *)FRAMEBUFFER1; break;
 				case 3: p = (char *)FRAMEBUFFER3; break;
 			}
 			nleft = FRAME_BYTES;
