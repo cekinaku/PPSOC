@@ -60,10 +60,8 @@ int configure_ov7670(void)
 	}
 
 	for (i = 0; i < sizeof(ov7670_fmt_rgb565) / sizeof(struct regval_list) - 1; i++) {
-		Status = XIicPs_MasterSendPolled(&Iic,
-				&ov7670_fmt_rgb565[i],
-				sizeof(struct regval_list),
-				IIC_SLAVE_ADDR);
+		u8 buf[2] = {ov7670_fmt_rgb565[i].reg_num, ov7670_fmt_rgb565[i].value};
+		Status = XIicPs_MasterSendPolled(&Iic, buf, 2, IIC_SLAVE_ADDR);
 		while (XIicPs_BusIsBusy(&Iic)) {
 			/* NOP */
 		}
@@ -71,6 +69,7 @@ int configure_ov7670(void)
 			xil_printf("IIC Write OV7670 Fmt RGB565 failed\r\n");
 			return XST_FAILURE;
 		}
+		usleep(10000); /* unneccessary according to the datasheet */
 	}
 
 	return XST_SUCCESS;
